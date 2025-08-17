@@ -1,0 +1,188 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run tests
+        run: go test -v ./...
+
+  build:
+    name: Build
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+
+          LDFLAGS="-s -w"
+          LDFLAGS="$LDFLAGS -X main.Version=${VERSION}"
+          LDFLAGS="$LDFLAGS -X main.Commit=${COMMIT}"
+          LDFLAGS="$LDFLAGS -X main.BuildTime=${BUILD_TIME}"
+
+          go build -ldflags "$LDFLAGS" -o go-zed-test-toggle-${{ matrix.suffix }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: go-zed-test-toggle-${{ matrix.suffix }}
+          path: go-zed-test-toggle-${{ matrix.suffix }}
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Create checksums
+        run: |
+          cd artifacts
+          for dir in */; do
+            if [ -d "$dir" ]; then
+              cd "$dir"
+              for file in *; do
+                if [ -f "$file" ]; then
+                  sha256sum "$file" > "${file}.sha256"
+                  mv "$file" ../
+                  mv "${file}.sha256" ../
+                fi
+              done
+              cd ..
+            fi
+          done
+          cd ..
+          mv artifacts/* .
+          rmdir artifacts/*/
+          rmdir artifacts
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            ## Changes in this Release
+
+            ### Binaries
+
+            | Platform | Architecture | Download |
+            |----------|--------------|----------|
+            | Linux    | amd64        | [go-zed-test-toggle-linux-amd64](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/go-zed-test-toggle-linux-amd64) |
+            | Linux    | arm64        | [go-zed-test-toggle-linux-arm64](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/go-zed-test-toggle-linux-arm64) |
+            | macOS    | amd64        | [go-zed-test-toggle-darwin-amd64](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/go-zed-test-toggle-darwin-amd64) |
+            | macOS    | arm64        | [go-zed-test-toggle-darwin-arm64](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/go-zed-test-toggle-darwin-arm64) |
+            | Windows  | amd64        | [go-zed-test-toggle-windows-amd64.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/go-zed-test-toggle-windows-amd64.exe) |
+
+            ### Installation
+
+            #### macOS/Linux
+            ```bash
+            # Download the appropriate binary for your platform
+            curl -L -o go-zed-test-toggle https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/go-zed-test-toggle-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/')
+
+            # Make it executable
+            chmod +x go-zed-test-toggle
+
+            # Move to your PATH
+            sudo mv go-zed-test-toggle /usr/local/bin/
+            ```
+
+            #### From Source
+            ```bash
+            go install github.com/${{ github.repository }}@${{ github.ref_name }}
+            ```
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Assets
+        run: |
+          for file in go-zed-test-toggle-*; do
+            if [ -f "$file" ]; then
+              echo "Uploading $file"
+              gh release upload "${{ github.ref_name }}" "$file" --clobber
+            fi
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
