@@ -132,6 +132,16 @@ func (s *SourceFile) IsTestFile() bool {
 	return false
 }
 
+// IsController checks if the file is a Rails controller
+func (s *SourceFile) IsController() bool {
+	return strings.Contains(s.Filename, "app/controllers/") && strings.HasSuffix(s.Filename, "_controller.rb")
+}
+
+// IsRequestSpec checks if the file is a Rails request spec
+func (s *SourceFile) IsRequestSpec() bool {
+	return strings.Contains(s.Filename, "spec/requests/") && strings.HasSuffix(s.Filename, "_controller_spec.rb")
+}
+
 // AlternateFile finds the alternate file (test->source or source->test)
 func (s *SourceFile) AlternateFile() string {
 	if s.IsTestFile() {
@@ -142,6 +152,16 @@ func (s *SourceFile) AlternateFile() string {
 
 // findAlternateSrc finds the source file for a test file
 func (s *SourceFile) findAlternateSrc() string {
+	// Special handling for request specs with _controller suffix
+	if s.IsRequestSpec() {
+		candidate := strings.Replace(s.Filename, "spec/requests/", "app/controllers/", 1)
+		candidate = strings.Replace(candidate, "_controller_spec.rb", "_controller.rb", 1)
+		target := filepath.Join(s.Project.Root, candidate)
+		if fileExists(target) {
+			return target
+		}
+	}
+
 	srcPaths := s.Project.SrcPaths()
 	testPaths := s.Project.TestPaths()
 	testRegexes := s.Project.TestRegexes()
@@ -166,6 +186,16 @@ func (s *SourceFile) findAlternateSrc() string {
 
 // findAlternateTest finds the test file for a source file
 func (s *SourceFile) findAlternateTest() string {
+	// Special handling for controllers -> request specs
+	if s.IsController() {
+		candidate := strings.Replace(s.Filename, "app/controllers/", "spec/requests/", 1)
+		candidate = strings.Replace(candidate, "_controller.rb", "_controller_spec.rb", 1)
+		target := filepath.Join(s.Project.Root, candidate)
+		if fileExists(target) {
+			return target
+		}
+	}
+
 	testPaths := s.Project.TestPaths()
 	srcPaths := s.Project.SrcPaths()
 

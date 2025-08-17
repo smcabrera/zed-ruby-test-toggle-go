@@ -276,6 +276,88 @@ func TestSourceFile_IsTestFile(t *testing.T) {
 	}
 }
 
+func TestSourceFile_IsController(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		expected bool
+	}{
+		{
+			name:     "controller file",
+			filename: "app/controllers/api/v1/foos_controller.rb",
+			expected: true,
+		},
+		{
+			name:     "non-controller file in controllers dir",
+			filename: "app/controllers/application.rb",
+			expected: false,
+		},
+		{
+			name:     "controller file outside controllers dir",
+			filename: "lib/foos_controller.rb",
+			expected: false,
+		},
+		{
+			name:     "regular ruby file",
+			filename: "app/models/user.rb",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			project := NewProject(dir)
+			sourceFile := NewSourceFile(tt.filename, project)
+
+			if got := sourceFile.IsController(); got != tt.expected {
+				t.Errorf("IsController() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSourceFile_IsRequestSpec(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		expected bool
+	}{
+		{
+			name:     "request spec with controller suffix",
+			filename: "spec/requests/api/v1/foos_controller_spec.rb",
+			expected: true,
+		},
+		{
+			name:     "regular request spec",
+			filename: "spec/requests/api/v1/foos_spec.rb",
+			expected: false,
+		},
+		{
+			name:     "controller spec in controllers dir",
+			filename: "spec/controllers/api/v1/foos_controller_spec.rb",
+			expected: false,
+		},
+		{
+			name:     "regular spec file",
+			filename: "spec/models/user_spec.rb",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			project := NewProject(dir)
+			sourceFile := NewSourceFile(tt.filename, project)
+
+			if got := sourceFile.IsRequestSpec(); got != tt.expected {
+				t.Errorf("IsRequestSpec() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestSourceFile_AlternateFile(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -375,6 +457,56 @@ func TestSourceFile_AlternateFile(t *testing.T) {
 			inputFile: "test/lib/user_test.rb",
 			expected:  "lib/user.rb",
 			isSpec:    false,
+		},
+		{
+			name: "find request spec for controller",
+			setupFunc: func(dir string) error {
+				// Create app/controllers/api/v1/foos_controller.rb
+				controllerDir := filepath.Join(dir, "app", "controllers", "api", "v1")
+				os.MkdirAll(controllerDir, 0755)
+				f1, _ := os.Create(filepath.Join(controllerDir, "foos_controller.rb"))
+				f1.Close()
+
+				// Create spec/requests/api/v1/foos_controller_spec.rb
+				requestsDir := filepath.Join(dir, "spec", "requests", "api", "v1")
+				os.MkdirAll(requestsDir, 0755)
+				f2, _ := os.Create(filepath.Join(requestsDir, "foos_controller_spec.rb"))
+				f2.Close()
+
+				// Create .rspec
+				f3, _ := os.Create(filepath.Join(dir, ".rspec"))
+				f3.Close()
+
+				return nil
+			},
+			inputFile: "app/controllers/api/v1/foos_controller.rb",
+			expected:  "spec/requests/api/v1/foos_controller_spec.rb",
+			isSpec:    true,
+		},
+		{
+			name: "find controller for request spec",
+			setupFunc: func(dir string) error {
+				// Create app/controllers/api/v1/foos_controller.rb
+				controllerDir := filepath.Join(dir, "app", "controllers", "api", "v1")
+				os.MkdirAll(controllerDir, 0755)
+				f1, _ := os.Create(filepath.Join(controllerDir, "foos_controller.rb"))
+				f1.Close()
+
+				// Create spec/requests/api/v1/foos_controller_spec.rb
+				requestsDir := filepath.Join(dir, "spec", "requests", "api", "v1")
+				os.MkdirAll(requestsDir, 0755)
+				f2, _ := os.Create(filepath.Join(requestsDir, "foos_controller_spec.rb"))
+				f2.Close()
+
+				// Create .rspec
+				f3, _ := os.Create(filepath.Join(dir, ".rspec"))
+				f3.Close()
+
+				return nil
+			},
+			inputFile: "spec/requests/api/v1/foos_controller_spec.rb",
+			expected:  "app/controllers/api/v1/foos_controller.rb",
+			isSpec:    true,
 		},
 		{
 			name: "no alternate file found",
