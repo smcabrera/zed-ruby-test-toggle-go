@@ -47,7 +47,7 @@ rails-app/
     ├── spec_helper.rb
     ├── models/
     │   └── user_spec.rb
-    ├── controllers/
+    ├── requests/
     │   └── users_controller_spec.rb
     └── services/
         └── user_service_spec.rb
